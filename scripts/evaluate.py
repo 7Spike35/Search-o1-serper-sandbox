@@ -19,8 +19,8 @@ def extract_answer(output, mode='gen'):
             extracted_text = matches[-1].strip()  # Take the last match
     elif mode == 'infogen':
         # Extract content after **Final Information** or **Modified Reasoning Steps**
-        pattern_info = "**Final Information**"
-        pattern_step = "**Modified Reasoning Steps**"
+        pattern_info = "\n**Final Information**"
+        pattern_step = "\n**Modified Reasoning Steps**"
         if pattern_info in output:
             extracted_text = output.split(pattern_info)[-1].replace("\n","").strip("```").strip()
         elif pattern_step in output:
@@ -119,6 +119,7 @@ def evaluate_predictions(output, labeled_answer, mode='gen'):
 
 
 def run_evaluation(filtered_data, input_list, output_list, dataset_name, output_dir, total_time, split, apply_backoff=False):
+    per_difficulty_metrics = {}
     if dataset_name == 'livecode':
         # Prepare samples and generations for codegen_metrics
         samples_list = []
@@ -300,10 +301,11 @@ def run_evaluation(filtered_data, input_list, output_list, dataset_name, output_
                     'num_valid_answer': f'{m["num_valid_answer"]} of {m["total_num"]}'
                 }
 
-        # 保存总体和分domain的指标
-        final_metrics = {'overall': overall_results}
-        if dataset_name == 'gpqa':
-            final_metrics['per_domain'] = domain_avg_metrics
+        # Save overall and per-domain metrics
+        final_metrics = {
+            'overall': overall_results,
+            'per_domain': per_difficulty_metrics
+        }
 
     t = time.localtime()
     result_json_name = f'{split}.{t.tm_mon}.{t.tm_mday},{t.tm_hour}:{t.tm_min}.json'

@@ -38,7 +38,8 @@ from prompts import (
     get_task_instruction_multi_choice,
     get_task_instruction_code,
     get_code_execution_instruction,
-    get_math_code_execution_instruction
+    get_math_code_execution_instruction,
+    get_hybrid_search_code_instruction
 )
 
 # Import sandbox tool
@@ -155,7 +156,7 @@ def parse_args():
     parser.add_argument(
         '--jina_api_key',
         type=str,
-        default='None',
+        default=os.getenv('JINA_API_KEY'),
         help="Your Jina API Key to Fetch URL Content."
     )
 
@@ -272,8 +273,7 @@ def main():
         top_k = 10
         max_doc_len = 3000
     
-    if args.jina_api_key == 'None':
-        jina_api_key = None
+    jina_api_key = args.jina_api_key
 
     # Set default repetition_penalty if not provided
     if repetition_penalty is None:
@@ -477,6 +477,10 @@ def main():
                 user_prompt = get_task_instruction_math(question, model_name='qwq')
             else:
                 user_prompt = get_task_instruction_math(question)
+
+        # Override instruction if both search and code execution are enabled
+        if not disable_search and enable_code_execution:
+            instruction = get_hybrid_search_code_instruction(MAX_SEARCH_LIMIT)
 
         prompt = [{"role": "user", "content": instruction + user_prompt}]
         prompt = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
