@@ -15,12 +15,13 @@ import regex as re
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-from bing_search import (
-    bing_web_search,
+from serper_search import (
+    serper_web_search,
     extract_relevant_info,
     fetch_page_content,
     extract_snippet_with_context
 )
+
 from evaluate import (
     run_evaluation,
     extract_answer
@@ -202,19 +203,12 @@ def parse_args():
         help="Maximum number of tokens to generate. If not set, defaults based on the model and dataset."
     )
 
-    # Bing API Configuration (optional when search is disabled)
+    # Serper API Configuration (optional when search is disabled)
     parser.add_argument(
-        '--bing_subscription_key',
+        '--serper_api_key',
         type=str,
-        default=None,
-        help="Bing Search API subscription key. Optional when --disable_search is used."
-    )
-
-    parser.add_argument(
-        '--bing_endpoint',
-        type=str,
-        default="https://api.bing.microsoft.com/v7.0/search",
-        help="Bing Search API endpoint."
+        required=True,
+        help="Serper API Key."
     )
 
     parser.add_argument(
@@ -257,16 +251,15 @@ def main():
     top_k_sampling = args.top_k_sampling
     repetition_penalty = args.repetition_penalty
     max_tokens = args.max_tokens
-    bing_subscription_key = args.bing_subscription_key
-    bing_endpoint = args.bing_endpoint
+    serper_api_key = args.serper_api_key
     use_jina = args.use_jina
     jina_api_key = args.jina_api_key
     disable_search = args.disable_search
     enable_code_execution = args.enable_code_execution
 
     # Validate arguments
-    if not disable_search and bing_subscription_key is None:
-        raise ValueError("--bing_subscription_key is required when search is not disabled. Use --disable_search to run without search functionality.")
+    if not disable_search and serper_api_key is None:
+        raise ValueError("--serper_api_key is required when search is not disabled. Use --disable_search to run without search functionality.")
 
     # Adjust parameters based on dataset and search settings
     if disable_search:
@@ -729,7 +722,8 @@ def main():
                             print(f"Using cached search results for query: \"{search_query}\"")
                         else:
                             try:
-                                results = bing_web_search(search_query, bing_subscription_key, bing_endpoint, market='en-US', language='en')
+                                results = serper_web_search(search_query, serper_api_key, None, market='en-US',
+                                                          language='en')
                                 search_cache[search_query] = results
                                 print(f"Executed and cached search for query: \"{search_query}\"")
                             except Exception as e:
@@ -737,7 +731,7 @@ def main():
                                 search_cache[search_query] = {}
                                 results = {}
 
-                        # Extract relevant information from Bing search results
+                        # Extract relevant information from Serper search results
                         relevant_info = extract_relevant_info(results)[:top_k]
                         seq['relevant_info'] = relevant_info
 
