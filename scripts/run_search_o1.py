@@ -9,38 +9,80 @@ import torch
 import string
 from typing import Optional, Tuple, List, Dict
 import argparse
+import json
+import regex as re
 
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
 from bing_search import (
-    bing_web_search, 
-    extract_relevant_info, 
-    fetch_page_content, 
+    bing_web_search,
+    extract_relevant_info,
+    fetch_page_content,
     extract_snippet_with_context
 )
 from evaluate import (
-    run_evaluation, 
+    run_evaluation,
     extract_answer
 )
 from prompts import (
-    get_gpqa_search_o1_instruction, 
-    get_math_search_o1_instruction, 
-    get_code_search_o1_instruction, 
-    get_singleqa_search_o1_instruction, 
-    get_multiqa_search_o1_instruction, 
+    get_gpqa_search_o1_instruction,
+    get_math_search_o1_instruction,
+    get_code_search_o1_instruction,
+    get_singleqa_search_o1_instruction,
+    get_multiqa_search_o1_instruction,
     get_webpage_to_reasonchain_instruction,
-    get_task_instruction_openqa, 
-    get_task_instruction_math, 
-    get_task_instruction_multi_choice, 
-    get_task_instruction_code, 
+    get_task_instruction_openqa,
+    get_task_instruction_math,
+    get_task_instruction_multi_choice,
+    get_task_instruction_code,
+    get_code_execution_instruction,
+    get_math_code_execution_instruction
 )
+
+# Import sandbox tool
+try:
+    import sys
+    import os
+    # Add current directory to path to ensure sandbox_fusion can be imported
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+
+    # Check if sandbox_fusion directory exists
+    sandbox_dir = os.path.join(parent_dir, 'sandbox_fusion')
+    if not os.path.exists(sandbox_dir):
+        raise ImportError(f"sandbox_fusion directory not found at {sandbox_dir}")
+
+    # Check if required dependencies are available
+    try:
+        import requests
+    except ImportError:
+        raise ImportError("requests library is required for sandbox_fusion but not installed")
+
+    from sandbox_fusion import create_sandbox_tool
+    SANDBOX_AVAILABLE = True
+    print("Sandbox fusion tool imported successfully.")
+except Exception as e:
+    SANDBOX_AVAILABLE = False
+    print(f"Warning: Sandbox fusion tool not available. Code execution will be disabled. Error: {e}")
+    print("To fix this issue:")
+    print("1. Ensure sandbox_fusion directory exists in the project root")
+    print("2. Install required dependencies: pip install requests")
+    print("3. Check Python path and working directory")
 
 # Define special tokens
 BEGIN_SEARCH_QUERY = "<|begin_search_query|>"
 END_SEARCH_QUERY = "<|end_search_query|>"
 BEGIN_SEARCH_RESULT = "<|begin_search_result|>"
 END_SEARCH_RESULT = "<|end_search_result|>"
+
+# Define code execution tokens (Hermes format for OpenAI function calling)
+TOOL_CALL_START = "<tool_call>"
+TOOL_CALL_END = "</tool_call>"
+BEGIN_CODE_RESULT = "<|begin_code_result|>"
+END_CODE_RESULT = "<|end_code_result|>"
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run Search O1 for various datasets and models.")
@@ -49,17 +91,21 @@ def parse_args():
     parser.add_argument(
         '--dataset_name',
         type=str,
-        required=True,
         choices=['gpqa', 'math500', 'aime', 'amc', 'livecode', 'nq', 'triviaqa', 'hotpotqa', '2wiki', 'musique', 'bamboogle'],
-        help="Name of the dataset to use."
+        help="Name of the dataset to use. If not specified, --data_path must be provided."
+    )
+
+    parser.add_argument(
+        '--data_path',
+        type=str,
+        help="Direct path to the dataset JSON file. If specified, --dataset_name and --split are ignored."
     )
 
     parser.add_argument(
         '--split',
         type=str,
-        required=True,
         choices=['test', 'diamond', 'main', 'extended'],
-        help="Dataset split to use."
+        help="Dataset split to use. Required if --dataset_name is specified."
     )
 
     parser.add_argument(
@@ -80,7 +126,7 @@ def parse_args():
     parser.add_argument(
         '--max_turn',
         type=int,
-        default=15,
+        default=20,
         help="Maximum number of turns."
     )
 
@@ -156,12 +202,12 @@ def parse_args():
         help="Maximum number of tokens to generate. If not set, defaults based on the model and dataset."
     )
 
-    # Bing API Configuration
+    # Bing API Configuration (optional when search is disabled)
     parser.add_argument(
         '--bing_subscription_key',
         type=str,
-        required=True,
-        help="Bing Search API subscription key."
+        default=None,
+        help="Bing Search API subscription key. Optional when --disable_search is used."
     )
 
     parser.add_argument(
@@ -169,6 +215,18 @@ def parse_args():
         type=str,
         default="https://api.bing.microsoft.com/v7.0/search",
         help="Bing Search API endpoint."
+    )
+
+    parser.add_argument(
+        '--disable_search',
+        action='store_true',
+        help="Disable web search functionality. Only code execution will be available."
+    )
+
+    parser.add_argument(
+        '--enable_code_execution',
+        action='store_true',
+        help="Enable code execution using sandbox tool."
     )
 
     return parser.parse_args()
@@ -179,6 +237,15 @@ def main():
     # Extract arguments
     dataset_name = args.dataset_name
     split = args.split
+    data_path = args.data_path
+
+    # Validate arguments
+    if data_path is None and dataset_name is None:
+        parser.error("Either --dataset_name or --data_path must be specified.")
+    if data_path is None and split is None:
+        parser.error("--split is required when using --dataset_name.")
+    if data_path is not None and (dataset_name is not None or split is not None):
+        print("Warning: --data_path specified, ignoring --dataset_name and --split.")
     subset_num = args.subset_num
     MAX_SEARCH_LIMIT = args.max_search_limit
     MAX_TURN = args.max_turn
@@ -194,9 +261,17 @@ def main():
     bing_endpoint = args.bing_endpoint
     use_jina = args.use_jina
     jina_api_key = args.jina_api_key
-    
-    # Adjust parameters based on dataset
-    if dataset_name in ['nq', 'triviaqa', 'hotpotqa', 'musique', 'bamboogle', '2wiki', 'medmcqa', 'pubhealth']:
+    disable_search = args.disable_search
+    enable_code_execution = args.enable_code_execution
+
+    # Validate arguments
+    if not disable_search and bing_subscription_key is None:
+        raise ValueError("--bing_subscription_key is required when search is not disabled. Use --disable_search to run without search functionality.")
+
+    # Adjust parameters based on dataset and search settings
+    if disable_search:
+        MAX_SEARCH_LIMIT = 0  # Disable all search attempts
+    elif dataset_name in ['nq', 'triviaqa', 'hotpotqa', 'musique', 'bamboogle', '2wiki', 'medmcqa', 'pubhealth']:
         MAX_SEARCH_LIMIT = 5
         if dataset_name in ['hotpotqa', 'musique', 'bamboogle', '2wiki']:
             MAX_SEARCH_LIMIT = 10
@@ -211,17 +286,24 @@ def main():
     if repetition_penalty is None:
         repetition_penalty = 1.05 if 'qwq' in model_path.lower() else 1.0
 
-    # Data paths based on dataset
-    if dataset_name == 'livecode':
-        data_path = f'./data/LiveCodeBench/{split}.json'
-    elif dataset_name in ['math500', 'gpqa', 'aime', 'amc']:
-        data_path = f'./data/{dataset_name.upper()}/{split}.json'
+    # Data paths based on dataset or direct path
+    if data_path is not None:
+        # Use direct path
+        print('-----------------------')
+        print(f'Using data from: {data_path}')
+        print('-----------------------')
     else:
-        data_path = f'./data/QA_Datasets/{dataset_name}.json'
+        # Use dataset name and split
+        if dataset_name == 'livecode':
+            data_path = f'./data/LiveCodeBench/{split}.json'
+        elif dataset_name in ['math500', 'gpqa', 'aime', 'amc']:
+            data_path = f'./data/{dataset_name.upper()}/{split}.json'
+        else:
+            data_path = f'{dataset_name}'
 
-    print('-----------------------')
-    print(f'Using {dataset_name} {split} set.')
-    print('-----------------------')
+        print('-----------------------')
+        print(f'Using {dataset_name} {split} set.')
+        print('-----------------------')
 
     # ---------------------- Caching Mechanism ----------------------
     # Define cache directories and file paths
@@ -259,16 +341,18 @@ def main():
     tokenizer.padding_side = 'left'
 
     # Define output directory based on model and dataset
+    output_dataset_name = dataset_name if dataset_name is not None else 'custom_data'
+
     if 'qwq' in model_path.lower():
-        if dataset_name in ['math500', 'gpqa', 'aime', 'amc', 'livecode']:
-            output_dir = f'./outputs/{dataset_name}.qwq.search_o1'
-            if dataset_name == 'gpqa' and (MAX_SEARCH_LIMIT != 5 or top_k != 10):
-                output_dir = f'./outputs/runs.analysis/{dataset_name}.qwq.search_o1.{MAX_SEARCH_LIMIT}.{top_k}'
+        if output_dataset_name in ['math500', 'gpqa', 'aime', 'amc', 'livecode']:
+            output_dir = f'./outputs/{output_dataset_name}.qwq.search_o1'
+            if output_dataset_name == 'gpqa' and (MAX_SEARCH_LIMIT != 5 or top_k != 10):
+                output_dir = f'./outputs/runs.analysis/{output_dataset_name}.qwq.search_o1.{MAX_SEARCH_LIMIT}.{top_k}'
         else:
-            output_dir = f'./outputs/runs.qa/{dataset_name}.qwq.search_o1'
+            output_dir = f'./outputs/runs.qa/{output_dataset_name}.qwq.search_o1'
     else:
         model_short_name = model_path.split('/')[-1].lower().replace('-instruct', '')
-        output_dir = f'./outputs/runs.baselines/{dataset_name}.{model_short_name}.search_o1'
+        output_dir = f'./outputs/runs.baselines/{output_dataset_name}.{model_short_name}.search_o1'
     os.makedirs(output_dir, exist_ok=True)
 
     # Initialize the LLM
@@ -277,6 +361,17 @@ def main():
         tensor_parallel_size=torch.cuda.device_count(),
         gpu_memory_utilization=0.95,
     )
+
+    # Initialize sandbox tool if available and enabled
+    sandbox_tool = None
+    if enable_code_execution and SANDBOX_AVAILABLE:
+        sandbox_tool = create_sandbox_tool()
+        if sandbox_tool:
+            print("Sandbox tool initialized successfully.")
+        else:
+            print("Failed to initialize sandbox tool.")
+    elif enable_code_execution and not SANDBOX_AVAILABLE:
+        print("Code execution enabled but sandbox tool not available. Please check sandbox_fusion installation.")
 
     # ---------------------- Data Loading ----------------------
     with open(data_path, 'r', encoding='utf-8') as json_file:
@@ -324,29 +419,49 @@ def main():
 
         return extracted_infos
 
+    # Determine dataset type for prompting
+    inferred_dataset_name = dataset_name
+    if inferred_dataset_name is None and data_path is not None:
+        # Try to infer dataset type from path
+        data_path_lower = data_path.lower()
+        if 'aime' in data_path_lower:
+            inferred_dataset_name = 'aime'
+        elif 'math500' in data_path_lower or 'math_500' in data_path_lower:
+            inferred_dataset_name = 'math500'
+        elif 'gpqa' in data_path_lower:
+            inferred_dataset_name = 'gpqa'
+        elif 'amc' in data_path_lower:
+            inferred_dataset_name = 'amc'
+        elif 'livecode' in data_path_lower:
+            inferred_dataset_name = 'livecode'
+        else:
+            # Default to math dataset
+            inferred_dataset_name = 'aime'
+
     # ---------------------- Preparation of Input Prompts ----------------------
     input_list = []
     for item in filtered_data:
         question = item['Question']
 
-        if dataset_name in ['nq', 'triviaqa', 'hotpotqa', 'musique', 'bamboogle', '2wiki']:
-            if dataset_name in ['nq', 'triviaqa']:
+        if inferred_dataset_name in ['nq', 'triviaqa', 'hotpotqa', 'musique', 'bamboogle', '2wiki']:
+            if inferred_dataset_name in ['nq', 'triviaqa']:
                 instruction = get_singleqa_search_o1_instruction(MAX_SEARCH_LIMIT)
-            elif dataset_name in ['hotpotqa', 'musique', 'bamboogle', '2wiki']:
+            elif inferred_dataset_name in ['hotpotqa', 'musique', 'bamboogle', '2wiki']:
                 instruction = get_multiqa_search_o1_instruction(MAX_SEARCH_LIMIT)
             if 'qwq' in model_path.lower():
                 user_prompt = get_task_instruction_openqa(question, model_name='qwq')
             else:
                 user_prompt = get_task_instruction_openqa(question)
 
-        elif dataset_name in ['math500', 'aime', 'amc']:
-            instruction = get_math_search_o1_instruction(MAX_SEARCH_LIMIT)
+        elif inferred_dataset_name in ['math500', 'aime', 'amc']:
+            # instruction = get_math_search_o1_instruction(MAX_SEARCH_LIMIT)
+            instruction = get_math_code_execution_instruction()
             if 'qwq' in model_path.lower():
                 user_prompt = get_task_instruction_math(question, model_name='qwq')
             else:
                 user_prompt = get_task_instruction_math(question)
 
-        elif dataset_name == 'gpqa':
+        elif inferred_dataset_name == 'gpqa':
             instruction = get_gpqa_search_o1_instruction(MAX_SEARCH_LIMIT)
             if 'qwq' in model_path.lower():
                 user_prompt = get_task_instruction_multi_choice(question, model_name='qwq')
@@ -355,7 +470,7 @@ def main():
             else:
                 user_prompt = get_task_instruction_multi_choice(question)
 
-        elif dataset_name == 'livecode':
+        elif inferred_dataset_name == 'livecode':
             instruction = get_code_search_o1_instruction(MAX_SEARCH_LIMIT)
             question_title = item.get('question_title', '')
             if 'qwq' in model_path.lower():
@@ -363,7 +478,12 @@ def main():
             else:
                 user_prompt = get_task_instruction_code(question)
         else:
-            user_prompt = ""  # Default to empty if dataset not matched
+            # Default to math dataset prompts
+            instruction = get_math_search_o1_instruction(MAX_SEARCH_LIMIT)
+            if 'qwq' in model_path.lower():
+                user_prompt = get_task_instruction_math(question, model_name='qwq')
+            else:
+                user_prompt = get_task_instruction_math(question)
 
         prompt = [{"role": "user", "content": instruction + user_prompt}]
         prompt = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
@@ -393,16 +513,48 @@ def main():
     else:
         max_tokens = 8192
 
+    # Function to extract tool calls from text (Hermes format)
+    def extract_tool_calls(text: str) -> List[Dict]:
+        """Extract tool calls from text using Hermes format."""
+        tool_call_regex = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+        matches = tool_call_regex.findall(text)
+        tool_calls = []
+
+        for match in matches:
+            try:
+                # Try to parse as JSON
+                tool_call = json.loads(match.strip())
+                if isinstance(tool_call, dict) and 'name' in tool_call and 'arguments' in tool_call:
+                    tool_calls.append(tool_call)
+            except json.JSONDecodeError:
+                # Try to clean and parse malformed JSON
+                try:
+                    cleaned_match = match.strip()
+                    # Remove trailing commas and fix common issues
+                    cleaned_match = re.sub(r',(\s*[}\]])', r'\1', cleaned_match)
+                    tool_call = json.loads(cleaned_match)
+                    if isinstance(tool_call, dict) and 'name' in tool_call and 'arguments' in tool_call:
+                        tool_calls.append(tool_call)
+                except:
+                    continue
+        return tool_calls
+
     # ---------------------- Generation Function ----------------------
-    def run_generation(sequences: List[Dict], max_tokens: int) -> List:
+    def run_generation(sequences: List[Dict], max_tokens: int, disable_search: bool = False) -> List:
         prompts = [s['prompt'] for s in sequences]
+
+        # Set stop tokens based on whether search is disabled
+        stop_tokens = [TOOL_CALL_END, tokenizer.eos_token]
+        if not disable_search:
+            stop_tokens.insert(0, END_SEARCH_QUERY)
+
         sampling_params = SamplingParams(
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k_sampling,
             repetition_penalty=repetition_penalty,
-            stop=[END_SEARCH_QUERY, tokenizer.eos_token],
+            stop=stop_tokens,
             include_stop_str_in_output=True,
         )
         output_list = llm.generate(prompts, sampling_params=sampling_params)
@@ -501,7 +653,7 @@ def main():
             turn += 1
             print(f'\n-------------- Turn {turn} --------------')
             print(f"We have {len(sequences_needing_generation)} sequences needing generation...")
-            outputs = run_generation(sequences_needing_generation, max_tokens)
+            outputs = run_generation(sequences_needing_generation, max_tokens, disable_search)
             print("Generation completed, processing outputs...")
 
             # Initialize batch variables
@@ -528,9 +680,49 @@ def main():
                 # Extract search query
                 search_query = extract_between(text, BEGIN_SEARCH_QUERY, END_SEARCH_QUERY)
 
+                # Extract tool calls from the generated text
+                tool_calls = extract_tool_calls(text)
+
+                # Check for code execution tool calls
+                code_execution_calls = [call for call in tool_calls if call.get('name') == 'code_interpreter']
+
+                if code_execution_calls:
+                    # Execute each code interpreter call
+                    for tool_call in code_execution_calls:
+                        arguments = tool_call.get('arguments', {})
+                        code_to_execute = arguments.get('code', '')
+
+                        if sandbox_tool:
+                            try:
+                                execution_result = sandbox_tool.execute_code(code_to_execute)
+                                append_text = f"\n\n{BEGIN_CODE_RESULT}\n{execution_result}\n{END_CODE_RESULT}\n\n"
+                                seq['prompt'] += append_text
+                                seq['output'] += append_text
+                                seq['history'].append(append_text)
+                                print(f"Executed code successfully. Result length: {len(execution_result)}")
+                            except Exception as e:
+                                error_text = f"\n\n{BEGIN_CODE_RESULT}\nError executing code: {e}\n{END_CODE_RESULT}\n\n"
+                                seq['prompt'] += error_text
+                                seq['output'] += error_text
+                                seq['history'].append(error_text)
+                                print(f"Error executing code: {e}")
+                        else:
+                            no_tool_text = f"\n\n{BEGIN_CODE_RESULT}\nCode execution is not available. Sandbox tool not initialized.\n{END_CODE_RESULT}\n\n"
+                            seq['prompt'] += no_tool_text
+                            seq['output'] += no_tool_text
+                            seq['history'].append(no_tool_text)
+                            print("Code execution requested but sandbox tool not available.")
+
                 # If a search query is present and needs to be executed
                 if search_query and seq['output'].rstrip().endswith(END_SEARCH_QUERY):
-                    if seq['search_count'] < MAX_SEARCH_LIMIT and search_query not in seq['executed_search_queries']:
+                    if disable_search:
+                        # Search is disabled, return a message indicating search is not available
+                        search_disabled_message = f"\n{BEGIN_SEARCH_RESULT}\nWeb search is disabled for this run. Only code execution is available.\n{END_SEARCH_RESULT}\n"
+                        seq['prompt'] += search_disabled_message
+                        seq['output'] += search_disabled_message
+                        seq['history'].append(search_disabled_message)
+                        print(f"Search requested but disabled for query: \"{search_query}\"")
+                    elif seq['search_count'] < MAX_SEARCH_LIMIT and search_query not in seq['executed_search_queries']:
                         # Execute search, use cache if available
                         if search_query in search_cache:
                             results = search_cache[search_query]
@@ -575,7 +767,7 @@ def main():
                         else:
                             truncated_prev_reasoning = ''
                             for i, step in enumerate(prev_steps):
-                                if i == 0 or i >= len(prev_steps) - 4 or BEGIN_SEARCH_QUERY in step or BEGIN_SEARCH_RESULT in step:
+                                if i == 0 or i >= len(prev_steps) - 4 or BEGIN_SEARCH_QUERY in step or BEGIN_SEARCH_RESULT in step or TOOL_CALL_START in step or TOOL_CALL_END in step or BEGIN_CODE_RESULT in step:
                                     truncated_prev_reasoning += step + '\n\n'
                                 else:
                                     if truncated_prev_reasoning[-len('\n\n...\n\n'):] != '\n\n...\n\n':
@@ -593,6 +785,9 @@ def main():
                         seq['search_count'] += 1
                         seq['executed_search_queries'].add(search_query)
 
+                    elif disable_search:
+                        # Already handled above
+                        pass
                     elif seq['search_count'] >= MAX_SEARCH_LIMIT:
                         limit_message = f"\n{BEGIN_SEARCH_RESULT}\nThe maximum search limit is exceeded. You are not allowed to search.\n{END_SEARCH_RESULT}\n"
                         seq['prompt'] += limit_message
@@ -608,9 +803,25 @@ def main():
                         print(f"Repeated search for query: \"{search_query}\"")
 
                 else:
-                    # If no search query needs to be executed, mark the sequence as finished
-                    seq['finished'] = True
-                    print("Sequence marked as complete.")
+                    # ------------------------------------------------------------------
+                    # MODIFIED LOGIC: Only finish if \boxed{} exists OR MAX_TURN reached
+                    # ------------------------------------------------------------------
+                    
+                    # 1. Check for boxed answer
+                    has_boxed_answer = '\\boxed{' in seq['output']
+
+                    # 2. Determine if finished
+                    if has_boxed_answer:
+                        seq['finished'] = True
+                        print("Sequence marked as complete - found \\boxed{} answer.")
+                    elif turn >= MAX_TURN:
+                        seq['finished'] = True
+                        print(f"Sequence marked as complete - reached maximum turns ({MAX_TURN}).")
+                    else:
+                        # Continue generation to allow tool outputs to be processed
+                        seq['finished'] = False
+                        # print(f"Continuing sequence - turn {turn}/{MAX_TURN}")
+
 
             # Batch fetch all URLs at once to optimize speed
             if all_urls_to_fetch:
@@ -700,8 +911,27 @@ def main():
     # Prepare output list for evaluation
     output_list = [seq['output'] for seq in active_sequences]
 
+    # Determine dataset name for evaluation (use provided name or try to infer from path)
+    eval_dataset_name = dataset_name
+    if eval_dataset_name is None and data_path is not None:
+        # Try to infer dataset name from path
+        data_path_lower = data_path.lower()
+        if 'aime' in data_path_lower:
+            eval_dataset_name = 'aime'
+        elif 'math500' in data_path_lower or 'math_500' in data_path_lower:
+            eval_dataset_name = 'math500'
+        elif 'gpqa' in data_path_lower:
+            eval_dataset_name = 'gpqa'
+        elif 'amc' in data_path_lower:
+            eval_dataset_name = 'amc'
+        elif 'livecode' in data_path_lower:
+            eval_dataset_name = 'livecode'
+        else:
+            # Default to generic math evaluation
+            eval_dataset_name = 'aime'  # Use AIME-style evaluation as default
+
     # Run evaluation
-    run_evaluation(filtered_data, input_list, output_list, dataset_name, output_dir, total_time, split)
+    run_evaluation(filtered_data, input_list, output_list, eval_dataset_name, output_dir, total_time, split)
 
     # ---------------------- Update Search and URL Cache ----------------------
     print('Updating Search and URL Cache...')

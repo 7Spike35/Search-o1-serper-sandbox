@@ -18,7 +18,15 @@ from io import StringIO
 # used for testing the code that reads from input
 from unittest.mock import patch, mock_open
 
-from pyext import RuntimeModule
+try:
+    from pyext import RuntimeModule
+    PYEXT_AVAILABLE = True
+except ImportError:
+    PYEXT_AVAILABLE = False
+    class RuntimeModule:
+        @staticmethod
+        def from_string(*args, **kwargs):
+            raise ImportError("pyext library is required for code generation evaluation. Please install pyext==0.7")
 
 from enum import Enum
 

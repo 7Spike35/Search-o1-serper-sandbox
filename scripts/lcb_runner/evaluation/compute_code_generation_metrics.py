@@ -13,7 +13,14 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from tqdm import tqdm
 
-from lcb_runner.evaluation.testing_util import run_test
+try:
+    from lcb_runner.evaluation.testing_util import run_test
+    PYEXT_AVAILABLE = True
+except ImportError:
+    PYEXT_AVAILABLE = False
+    def run_test(*args, **kwargs):
+        raise ImportError("pyext library is required for code generation evaluation. Please install pyext==0.7")
+
 from lcb_runner.evaluation.pass_k_utils import compute_metrics_from_results
 
 

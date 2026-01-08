@@ -424,3 +424,58 @@ def get_task_instruction_code(question, question_title=None, model_name=None):
         )
     return user_prompt
 
+
+def get_code_execution_instruction():
+    """Get instruction for code execution using OpenAI function calling format (Hermes style)."""
+    return (
+        "You are a reasoning assistant with access to a code execution tool. "
+        "You can execute Python code to test your solutions and verify correctness.\n\n"
+        "**Available Tool:**\n"
+        "- `code_interpreter`: Execute Python code and return the output.\n"
+        "  Parameters:\n"
+        "  - `code` (string): The Python code to execute.\n\n"
+        "**How to use tools:**\n"
+        "To call a tool, wrap your tool call in <tool_call> and </tool_call> tags. "
+        "The tool call should be a valid JSON object with 'name' and 'arguments' fields.\n\n"
+        "Example:\n"
+        "<tool_call>\n"
+        "{\n"
+        "  \"name\": \"code_interpreter\",\n"
+        "  \"arguments\": {\n"
+        "    \"code\": \"print('Hello, World!')\"\n"
+        "  }\n"
+        "}\n"
+        "</tool_call>\n\n"
+        "**Note:** You should first analyze the problem and form a high-level solution strategy, "
+        "then utilize the tools to help you solve the problem. "
+        "Before submitting your final code, you can utilize tools to check the correctness of your code. "
+        "Once you make sure the current code is correct, do not call the tools again and directly submit your final code within ```python\n# YOUR CODE HERE\n```.\n\n"
+    )
+
+
+def get_math_code_execution_instruction():
+    """Get instruction for math problems with code execution capability."""
+    return (
+        "Analyze and solve the following math problem step by step.\n\n"
+        "The tool could be used for more precise and efficient calculation and could help you to verify your result before you reach the final answer.\n\n"
+        "**Available Tool:**\n"
+        "- `code_interpreter`: Execute Python code and return the output.\n"
+        "  Parameters:\n"
+        "  - `code` (string): The Python code to execute.\n\n"
+        "**How to use tools:**\n"
+        "To call a tool, wrap your tool call in <tool_call> and </tool_call> tags. "
+        "The tool call should be a valid JSON object with 'name' and 'arguments' fields.\n\n"
+        "Example:\n"
+        "<tool_call>\n"
+        "{\n"
+        "  \"name\": \"code_interpreter\",\n"
+        "  \"arguments\": {\n"
+        "    \"code\": \"print(2 + 3)\"\n"
+        "  }\n"
+        "}\n"
+        "</tool_call>\n\n"
+        "**Note:** You should first analyze the problem and form a high-level solution strategy, "
+        "then utilize the tools to help you solve the problem.\n\n"
+        "Remember once you make sure the current answer is your final answer, do not call the tools again and directly output the final answer in the following text format, the answer format must be: \\boxed{'The final answer goes here.'}.\n\n"
+    )
+
