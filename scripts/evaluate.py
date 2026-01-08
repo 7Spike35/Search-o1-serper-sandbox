@@ -237,7 +237,7 @@ def run_evaluation(filtered_data, input_list, output_list, dataset_name, output_
             elif dataset_name in ['math500', 'aime', 'amc']:
                 labeled_answer = item["answer"]
                 mode = 'gen'
-            elif dataset_name in ['nq', 'triviaqa', 'hotpotqa', 'musique', 'bamboogle', '2wiki']:
+            elif dataset_name in ['nq', 'triviaqa', 'hotpotqa', 'musique', 'bamboogle', '2wiki', 'browsercomp']:
                 labeled_answer = item["answer"]
                 mode = 'qa'
             elif dataset_name in ['pubhealth']:

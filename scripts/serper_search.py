@@ -113,7 +113,8 @@ def extract_text_from_url(url, use_jina=False, jina_api_key=None, snippet: Optio
                 'Authorization': f'Bearer {jina_api_key}',
                 'X-Return-Format': 'markdown',
             }
-            response = requests.get(f'https://r.jina.ai/{url}', headers=jina_headers).text
+            # Add timeout to prevent hanging indefinitely
+            response = requests.get(f'https://r.jina.ai/{url}', headers=jina_headers, timeout=30).text
             pattern = r"\(https?:.*?\)|\[https?:.*?\]"
             text = re.sub(pattern, "", response).replace('---','-').replace('===','=').replace('   ',' ').replace('   ',' ')
         else:
@@ -142,11 +143,11 @@ def extract_text_from_url(url, use_jina=False, jina_api_key=None, snippet: Optio
     except requests.exceptions.ConnectionError:
         return "Error: Connection error occurred"
     except requests.exceptions.Timeout:
-        return "Error: Request timed out after 20 seconds"
+        return "Error: Request timed out after 30 seconds"
     except Exception as e:
         return f"Unexpected error: {str(e)}"
 
-def fetch_page_content(urls, max_workers=4, use_jina=False, jina_api_key=None, snippets: Optional[dict] = None):
+def fetch_page_content(urls, max_workers=8, use_jina=False, jina_api_key=None, snippets: Optional[dict] = None):
     """
     Concurrently fetch content from multiple URLs.
     """
@@ -156,14 +157,16 @@ def fetch_page_content(urls, max_workers=4, use_jina=False, jina_api_key=None, s
             executor.submit(extract_text_from_url, url, use_jina, jina_api_key, snippets.get(url) if snippets else None): url
             for url in urls
         }
-        for future in concurrent.futures.as_completed(futures): # removed tqdm to reduce clutter if called frequently, or can keep it
+        for future in concurrent.futures.as_completed(futures): 
             url = futures[future]
             try:
-                data = future.result()
+                # Enforce a slightly longer timeout on the future result itself
+                data = future.result(timeout=40)
                 results[url] = data
+            except concurrent.futures.TimeoutError:
+                results[url] = "Error: Task timed out"
             except Exception as exc:
                 results[url] = f"Error fetching {url}: {exc}"
-            time.sleep(0.2)
     return results
 
 def serper_web_search(query, subscription_key, endpoint="https://google.serper.dev/search", market='en-US', language='en', timeout=20):
