@@ -7,6 +7,7 @@ def get_gpqa_search_o1_instruction(MAX_SEARCH_LIMIT):
         "- To perform a search: write <|begin_search_query|> your query here <|end_search_query|>.\n"
         "Then, the system will search and analyze relevant web pages, then provide you with helpful information in the format <|begin_search_result|> ...search results... <|end_search_result|>.\n\n"
         f"You can repeat the search process multiple times if necessary. The maximum number of search attempts is limited to {MAX_SEARCH_LIMIT}.\n\n"
+        "If you receive a message stating that the search limit has been exceeded, you MUST immediately provide your final answer based on the information you have gathered so far. Do not attempt to search again.\n\n"
         "Once you have all the information you need, continue your reasoning.\n\n"
         "Example:\n"
         "Question: \"What is the energy range of pp III neutrinos?\"\n"
@@ -29,6 +30,7 @@ def get_math_search_o1_instruction(MAX_SEARCH_LIMIT):
         "- To perform a search: write <|begin_search_query|> your query here <|end_search_query|>.\n"
         "Then, the system will search and analyze relevant web pages, then provide you with helpful information in the format <|begin_search_result|> ...search results... <|end_search_result|>.\n\n"
         f"You can repeat the search process multiple times if necessary. The maximum number of search attempts is limited to {MAX_SEARCH_LIMIT}.\n\n"
+        "If you receive a message stating that the search limit has been exceeded, you MUST immediately provide your final answer based on the information you have gathered so far. Do not attempt to search again.\n\n"
         "Once you have all the information you need, continue your reasoning.\n\n"
         "Example:\n"
         "Question: \"How do you compute the integral of e^(x^2) dx?\"\n"
@@ -51,6 +53,7 @@ def get_code_search_o1_instruction(MAX_SEARCH_LIMIT):
         "- To perform a search: write <|begin_search_query|> your query here <|end_search_query|>.\n"
         "Then, the system will search and analyze relevant web pages, then provide you with helpful information in the format <|begin_search_result|> ...search results... <|end_search_result|>.\n\n"
         f"You can repeat the search process multiple times if necessary. The maximum number of search attempts is limited to {MAX_SEARCH_LIMIT}.\n\n"
+        "If you receive a message stating that the search limit has been exceeded, you MUST immediately provide your final answer based on the information you have gathered so far. Do not attempt to search again.\n\n"
         "Once you have all the information you need, continue your reasoning.\n\n"
         "Example:\n"
         "Question: \"Find the minimum number of vertices in a Steiner tree that includes all specified vertices in a given tree.\"\n"
@@ -114,6 +117,7 @@ def get_singleqa_search_o1_instruction(MAX_SEARCH_LIMIT):
         "- To perform a search: write <|begin_search_query|> your query here <|end_search_query|>.\n"
         "Then, the system will search and analyze relevant web pages, then provide you with helpful information in the format <|begin_search_result|> ...search results... <|end_search_result|>.\n\n"
         f"You can repeat the search process multiple times if necessary. The maximum number of search attempts is limited to {MAX_SEARCH_LIMIT}.\n\n"
+        "If you receive a message stating that the search limit has been exceeded, you MUST immediately provide your final answer based on the information you have gathered so far. Do not attempt to search again.\n\n"
         "Once you have all the information you need, continue your reasoning.\n\n"
         "Example:\n"
         "Question: \"Who got the first Nobel Prize in Physics?\"\n"
@@ -135,6 +139,7 @@ def get_multiqa_search_o1_instruction(MAX_SEARCH_LIMIT):
         "- To perform a search: write <|begin_search_query|> your query here <|end_search_query|>.\n"
         "Then, the system will search and analyze relevant web pages, then provide you with helpful information in the format <|begin_search_result|> ...search results... <|end_search_result|>.\n\n"
         f"You can repeat the search process multiple times if necessary. The maximum number of search attempts is limited to {MAX_SEARCH_LIMIT}.\n\n"
+        "If you receive a message stating that the search limit has been exceeded, you MUST immediately provide your final answer based on the information you have gathered so far. Do not attempt to search again.\n\n"
         "Once you have all the information you need, continue your reasoning.\n\n"
         "Example:\n"
         "Question: \"Alice David is the voice of Lara Croft in a video game developed by which company?\"\n"
@@ -476,7 +481,7 @@ def get_math_code_execution_instruction():
         "</tool_call>\n\n"
         "**Note:** You should first analyze the problem and form a high-level solution strategy, "
         "then utilize the tools to help you solve the problem.\n\n"
-        "Remember once you make sure the current answer is your final answer, do not call the tools again and directly output the final answer in the following text format, the answer format must be: \\boxed{'The final answer goes here.'}.\n\n"
+        "Remember once you make sure the current answer is your final answer, do not call the tools again and directly output the final answer in the following text format, the answer format must be: \\boxed{YOUR_ANSWER}.\n\n"
     )
 
 
@@ -490,6 +495,7 @@ def get_hybrid_search_code_instruction(MAX_SEARCH_LIMIT):
         "   - To perform a web search: write <|begin_search_query|> your search query here <|end_search_query|>.\n"
         "   - The system will search and analyze relevant web pages, then provide helpful information in the format <|begin_search_result|> ...search results... <|end_search_result|>.\n"
         "   - You can perform up to {MAX_SEARCH_LIMIT} searches.\n\n"
+        "If you receive a message stating that the search limit has been exceeded, you MUST immediately provide your final answer based on the information you have gathered so far. Do not attempt to search again.\n\n"
         "2. **Code Execution Tool:**\n"
         "   - `code_interpreter`: Execute Python code and return the output.\n"
         "     Parameters:\n"
@@ -512,6 +518,6 @@ def get_hybrid_search_code_instruction(MAX_SEARCH_LIMIT):
         "</tool_call>\n\n"
         "**Note:** You should first analyze the problem and form a high-level solution strategy, "
         "then utilize the appropriate tools to help you solve the problem. Use web search when you need external knowledge or references, and use code execution for mathematical calculations and computations.\n\n"
-        "Remember once you make sure the current answer is your final answer, do not call the tools again and directly output the final answer in the following text format, the answer format must be: \\boxed{'The final answer goes here.'}.\n\n"
+        "Remember once you make sure the current answer is your final answer, do not call the tools again and directly output the final answer in the following text format, the answer format must be: \\boxed{YOUR_ANSWER}.\n\n"
     )
 

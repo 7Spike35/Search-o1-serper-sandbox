@@ -865,7 +865,12 @@ def main():
                         # Already handled above
                         pass
                     elif seq['search_count'] >= MAX_SEARCH_LIMIT:
-                        limit_message = f"\n{BEGIN_SEARCH_RESULT}\nThe maximum search limit is exceeded. You are not allowed to search.\n{END_SEARCH_RESULT}\n"
+                        limit_message = f"\n{BEGIN_SEARCH_RESULT}\nThe maximum search limit is exceeded. You are not allowed to search. Please answer the question directly.\n{END_SEARCH_RESULT}\n"
+                        
+                        # Check if we just sent a limit message (simple check against history)
+                        if seq['history'] and "The maximum search limit is exceeded" in seq['history'][-1]:
+                            limit_message = f"\n{BEGIN_SEARCH_RESULT}\nSYSTEM: The maximum search limit is exceeded. You have ALREADY been warned. You MUST provide your final answer immediately in the format \\boxed{{ANSWER}}.\n{END_SEARCH_RESULT}\n"
+
                         seq['prompt'] += limit_message
                         seq['output'] += limit_message
                         seq['history'].append(limit_message)
@@ -891,8 +896,19 @@ def main():
                         seq['finished'] = True
                         print("Sequence marked as complete - found \\boxed{} answer.")
                     elif turn >= MAX_TURN:
-                        seq['finished'] = True
-                        print(f"Sequence marked as complete - reached maximum turns ({MAX_TURN}).")
+                        if seq.get('forced_answer', False):
+                            # Already forced answer in previous turn, now stop
+                            seq['finished'] = True
+                            print(f"Sequence marked as complete - reached maximum turns ({MAX_TURN}) after forcing answer.")
+                        else:
+                            # Force answer generation
+                            force_msg = "\n\nThe maximum number of turns has been reached. Please summarize the information you have gathered so far and provide your final answer in the format \\boxed{YOUR_ANSWER}."
+                            seq['prompt'] += force_msg
+                            seq['output'] += force_msg
+                            seq['history'].append(force_msg)
+                            seq['forced_answer'] = True
+                            print(f"Max turns reached. Forcing final answer for sequence.")
+                            # Do NOT mark as finished, allow one more generation
                     else:
                         # Continue generation to allow tool outputs to be processed
                         seq['finished'] = False
