@@ -1308,7 +1308,40 @@ def main():
             break
         else:
             if turn >= MAX_TURN:
-                print(f"Maximum number of turns ({MAX_TURN}) reached, stopping.")
+                print(f"Maximum number of turns ({MAX_TURN}) reached.")
+                
+                # Check for unfinished sequences
+                force_finish_sequences = [seq for seq in active_sequences if not seq['finished']]
+                
+                if force_finish_sequences:
+                    print(f"Forcing final answer for {len(force_finish_sequences)} unfinished sequences...")
+                    
+                    # Append force finish prompt
+                    force_prompt = (
+                        f"\n\n{BEGIN_SEARCH_RESULT}\n"
+                        "System Notification: Maximum number of turns allowed has been reached. "
+                        "You must stop searching, coding, or using tools immediately. "
+                        "Please verify your current findings, summarize them concisely, and provide your final answer now. "
+                        "You MUST output the final answer in the format \\boxed{YOUR_ANSWER}."
+                        f"\n{END_SEARCH_RESULT}\n\n"
+                    )
+                    
+                    for seq in force_finish_sequences:
+                        seq['prompt'] += force_prompt
+                        seq['output'] += force_prompt
+                        seq['history'].append(force_prompt)
+                    
+                    # Run one last generation step
+                    # Use a moderate token limit to ensure enough space for reasoning + answer but prevent infinite loops
+                    final_outputs = run_generation(force_finish_sequences, max_tokens=2048, disable_search=True)
+                    
+                    for seq, out in zip(force_finish_sequences, final_outputs):
+                        text = out.outputs[0].text
+                        seq['output'] += text
+                        seq['history'].append(text)
+                        seq['finished'] = True # Mark as finished regardless of output
+                        print("Generated forced final response.")
+                
                 break
 
     total_time = time.time() - start_time
