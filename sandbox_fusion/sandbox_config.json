@@ -1,8 +1,12 @@
 {
-  "sandbox_fusion_url": "https://sd58dqj3dr43upa0div0g.apigateway-cn-beijing.volceapi.com/run_code",
-  "token": "86e4e976-d4cb-4434-8472-22fbe060d713",
-  "api_key": "86e4e976-d4cb-4434-8472-22fbe060d713",
+  "sandbox_fusion_url": "http://localhost:8080/run_code",
+  "token": "",
+  "api_key": "",
+  "num_workers": 8,
+  "enable_global_rate_limit": true,
+  "rate_limit": 8,
+  "default_timeout": 200,
+  "default_language": "python",
   "memory_limit_mb": 2048,
-  "default_timeout": 60,
-  "default_language": "python"
+  "type": "native"
 }
