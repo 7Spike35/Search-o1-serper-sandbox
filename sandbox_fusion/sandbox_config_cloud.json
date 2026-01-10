@@ -1,7 +1,7 @@
 {
-  "sandbox_fusion_url": "https://sd58dqj3dr43upa0div0g.apigateway-cn-beijing.volceapi.com/run_code",
-  "token": "86e4e976-d4cb-4434-8472-22fbe060d713",
-  "api_key": "86e4e976-d4cb-4434-8472-22fbe060d713",
+  "sandbox_fusion_url": "put_your_url_here/run_code",
+  "token": "token here",
+  "api_key": "api key here",
   "memory_limit_mb": 2048,
   "default_timeout": 120,
   "default_language": "python"

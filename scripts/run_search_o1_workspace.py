@@ -578,6 +578,49 @@ def parse_args():
 
 def main():
     """Main function to run Search-O1 with workspace functionality."""
+    # Configure proxy settings to exclude localhost and sandbox URL
+    # This addresses the issue where serper proxy settings interfere with local docker/sandbox connections.
+    if os.environ.get("http_proxy") or os.environ.get("https_proxy"):
+        no_proxy = os.environ.get("no_proxy", "")
+        additions = []
+
+        # 1. Always add localhost defaults
+        if "localhost" not in no_proxy:
+            additions.append("localhost")
+        if "127.0.0.1" not in no_proxy:
+            additions.append("127.0.0.1")
+        
+        # 2. Try to add sandbox URL from config
+        try:
+            # Determine path to sandbox_config.json (relative to this script)
+            # script is in /scripts/, config is in /sandbox_fusion/
+            current_dir_script = os.path.dirname(os.path.abspath(__file__))
+            config_path = os.path.join(os.path.dirname(current_dir_script), 'sandbox_fusion', 'sandbox_config.json')
+            
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                    sandbox_url = config_data.get("sandbox_fusion_url", "")
+                    
+                    if sandbox_url:
+                        from urllib.parse import urlparse
+                        parsed_url = urlparse(sandbox_url)
+                        hostname = parsed_url.hostname
+                        # Check strictly if hostname exists and is not already covered
+                        if hostname and hostname not in no_proxy and hostname not in additions:
+                            additions.append(hostname)
+                            print(f"Added sandbox host '{hostname}' to no_proxy.")
+        except Exception as e:
+            # Swallow errors to ensure original logic persists (user requirement)
+            print(f"Warning: Could not auto-configure no_proxy for sandbox URL: {e}")
+
+        if additions:
+            suffix = ",".join(additions)
+            updated_no_proxy = f"{no_proxy},{suffix}" if no_proxy else suffix
+            os.environ["no_proxy"] = updated_no_proxy
+            os.environ["NO_PROXY"] = updated_no_proxy
+            print(f"Automatically configured no_proxy: {updated_no_proxy}")
+
     args = parse_args()
 
     # Extract arguments
